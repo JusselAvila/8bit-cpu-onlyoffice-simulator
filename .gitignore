@@ -1,0 +1,15 @@
+# 8-bit CPU ONLYOFFICE Simulator
+
+## Directory Layout
+- `/src`: Source code for simulator modules (CPU, RAM, UI, etc.).
+- `/docs`: Technical documentation and platform approvals.
+- `/program`: Machine code programs or exported spreadsheets.
+- `/tests`: Testing and validation scripts.
+
+## Commit Conventions
+This project strictly follows these commit message prefixes:
+- **feat:** Adds a new feature (e.g., `feat: add instruction decoder`).
+- **fix:** Resolves a bug (e.g., `fix: program counter overflow`).
+- **docs:** Changes exclusively to documentation.
+- **refactor:** Code changes that neither fix a bug nor add a feature.
+- **chore:** Maintenance tasks, environment setup, or repository initialization.
