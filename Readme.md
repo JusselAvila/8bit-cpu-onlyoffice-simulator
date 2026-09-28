@@ -26,7 +26,7 @@ It shows the full instruction cycle (**Fetch → Decode → Execute → Store**)
 
 The simulator follows the von Neumann model: one memory holds both instructions and data, and the CPU communicates with it through an address bus and a data bus.
 
-``````mermaid
+```mermaid
 flowchart LR
     subgraph CPU
         CU["Control Unit<br/>(Decoder)"]
@@ -50,7 +50,8 @@ flowchart LR
     ALU --> FLAGS
     MAR == "Address bus" ==> RAM
     RAM == "Data bus" ==> MDR
-    MDR == "Data bus (write)" ==> RAM|
+    MDR == "Data bus (write)" ==> RAM
+
 ```
 
 ### Registers
@@ -174,4 +175,3 @@ README.md
 
 ## 8. Testing
 
-<!-- TODO: link to /tests/test-plan.md when ready. -->
