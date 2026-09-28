@@ -14,6 +14,7 @@ It shows the full instruction cycle (**Fetch → Decode → Execute → Store**)
 | Area | Status |
 |------|--------|
 | Repository & Kanban board | Done |
+| Platform approval & modular structure | Done |
 | RAM grid & converters | Pending |
 | Registers & flags | Pending |
 | Fetch / Decode / Execute / Store | Pending |
@@ -25,7 +26,7 @@ It shows the full instruction cycle (**Fetch → Decode → Execute → Store**)
 
 The simulator follows the von Neumann model: one memory holds both instructions and data, and the CPU communicates with it through an address bus and a data bus.
 
-```mermaid
+``````mermaid
 flowchart LR
     subgraph CPU
         CU["Control Unit<br/>(Decoder)"]
@@ -49,7 +50,7 @@ flowchart LR
     ALU --> FLAGS
     MAR == "Address bus" ==> RAM
     RAM == "Data bus" ==> MDR
-    MDR == "Data bus (write)" ==> RAM
+    MDR == "Data bus (write)" ==> RAM|
 ```
 
 ### Registers
