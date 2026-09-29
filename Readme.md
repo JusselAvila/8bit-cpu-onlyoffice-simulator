@@ -16,7 +16,7 @@ It shows the full instruction cycle (**Fetch → Decode → Execute → Store**)
 | Repository & Kanban board | Done |
 | Platform approval & modular structure | Done |
 | RAM grid & converters | Done |
-| Registers & flags | Pending |
+| Registers & flags | Done |
 | Fetch / Decode / Execute / Store | Pending |
 | Step & Run modes, logger | Pending |
 | Demo program | Pending |
