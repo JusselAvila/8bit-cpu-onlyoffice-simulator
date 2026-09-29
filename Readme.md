@@ -54,6 +54,8 @@ flowchart LR
 
 ```
 
+In code, the CPU never touches the RAM array directly: every read/write goes through `Bus.read(address)` / `Bus.write(address, value)` (see `/src/bus.js`), which keeps memory access swappable for Parcial 2's system bus.
+
 ### Registers
 
 | Register | Size | Purpose |
@@ -161,17 +163,26 @@ Expected final state: `AX = 1Eh (30)`, `BX = 00h`, `ZF = 1`, `RAM[80h] = 1Eh`.
 | `refactor:` | Code change without behavior change |
 | `chore:` | Repository maintenance |
 
-Example: `feat: add ReadRAM/WriteRAM with boundary validation (#8)`
+Example: `feat: add ReadRAM/WriteRAM with boundary validation (#21)`
+
+See [`/docs/architecture.md`](docs/architecture.md) for the module breakdown and the Bus abstraction used between the CPU and RAM.
 
 ## 7. Repository structure
 
 ```
-/src        Simulator source (ram.js, cpu.js, alu.js, decoder.js, ui.js, logger.js, main.js)
-/docs       Architecture notes, screenshots, platform approval
-/program    Demo program (.asm and .hex)
-/tests      Test plan and test cases
+/src
+  utils.js    Shared formatting helpers (toHex, toBin, toDec)
+  bus.js      System Bus abstraction (CPU never touches RAM array directly)
+  ram.js      256-byte RAM, ReadRAM/WriteRAM, ClearRAM, display-mode logic
+  cpu.js      Registers, flags, GetSegment, ResetCPU
+  ui.js       All ONLYOFFICE sheet/cell interaction (registers, flags, RAM grid)
+  alu.js      Arithmetic/logic operations (pending)
+  decoder.js  Opcode decoding (pending)
+  logger.js   Execution log panel (pending)
+  main.js     Wires STEP/RUN/PAUSE/RESET/LOAD to the modules (pending)
+/docs         Architecture notes, screenshots, platform approval
+/program      Demo program (.asm and .hex)
+/tests        Test plan and test cases
+simulator.xlsx
 README.md
 ```
-
-## 8. Testing
-

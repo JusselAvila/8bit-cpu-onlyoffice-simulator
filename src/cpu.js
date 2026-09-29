@@ -1,18 +1,5 @@
 // src/cpu.js - CPU Registers, Status Flags, and Memory Segmentation Engine
 
-// --- 0. Helper Formatting Functions ---
-function toHex(val) {
-    return val.toString(16).toUpperCase().padStart(2, '0');
-}
-
-function toBin(val) {
-    return val.toString(2).padStart(8, '0');
-}
-
-function toDec(val) {
-    return val.toString(10);
-}
-
 // --- 1. CPU Registers (8-bit state objects) ---
 let registers = {
     PC: 0x00, // Program Counter
@@ -57,7 +44,7 @@ function GetSegment(address) {
 
 /**
  * Writes a value to a register, ensuring it is masked to 8 bits (& 0xFF)
- * and updates its visualization in the ONLYOFFICE sheet.
+ * and delegates the sheet update to the UI module.
  */
 function SetRegister(regName, value) {
     if (!registers.hasOwnProperty(regName)) {
@@ -70,9 +57,9 @@ function SetRegister(regName, value) {
 
     // Force truncation to 8 bits (0 - 255)
     registers[regName] = value & 0xFF;
-    
-    // Update visual cells in the sheet
-    updateRegisterInSheet(regName, registers[regName]);
+
+    // Delegate visual update to ui.js
+    UI.updateRegister(regName, registers[regName]);
 }
 
 /**
@@ -83,12 +70,12 @@ function SetFlag(flagName, value) {
         console.error(`[CPU Error] Unknown flag: ${flagName}`);
         throw new Error(`Unknown flag: ${flagName}`);
     }
-    
+
     // Flags are logical binary values (0 or 1)
     flags[flagName] = value ? 1 : 0;
-    
-    // Update visual flag cell in the sheet
-    updateFlagInSheet(flagName, flags[flagName]);
+
+    // Delegate visual update to ui.js
+    UI.updateFlag(flagName, flags[flagName]);
 }
 
 /**
@@ -99,85 +86,17 @@ function ResetCPU() {
     // Reset registers to 0
     for (let reg in registers) {
         registers[reg] = 0x00;
-        updateRegisterInSheet(reg, 0x00);
+        UI.updateRegister(reg, 0x00);
     }
 
     // Reset flags to 0
     for (let flag in flags) {
         flags[flag] = 0;
-        updateFlagInSheet(flag, 0);
+        UI.updateFlag(flag, 0);
     }
 
-    // Clear phase state and step counter in the sheet (Rows 18 & 19, Col 3)
-    const sheet = Api.GetActiveSheet();
-    sheet.GetCells(18, 3).SetValue("FETCH");
-    sheet.GetCells(19, 3).SetValue(0);
+    // Delegate phase/step-counter reset to ui.js
+    UI.resetPhaseIndicator();
 
     console.log("[CPU] CPU reset successfully (RAM contents preserved, Phase reset).");
 }
-
-// --- 4. Visual Mapping Functions for ONLYOFFICE Sheet ---
-
-function updateRegisterInSheet(regName, value) {
-    const sheet = Api.GetActiveSheet();
-    
-    // Exact row mapping for registers (PC=6 to BX=11)
-    const registerRows = {
-        PC: 6,
-        IR: 7,
-        MAR: 8,
-        MDR: 9,
-        AX: 10,
-        BX: 11
-    };
-
-    if (registerRows.hasOwnProperty(regName)) {
-        let row = registerRows[regName];
-        
-        // Columna C (3): Hex, Columna D (4): Binary, Columna E (5): Decimal
-        sheet.GetCells(row, 3).SetValue(toHex(value));
-        sheet.GetCells(row, 4).SetValue(toBin(value));
-        sheet.GetCells(row, 5).SetValue(toDec(value));
-    }
-}
-
-function updateFlagInSheet(flagName, value) {
-    const sheet = Api.GetActiveSheet();
-    
-    // Exact row mapping for flags (ZF=14, CF=15, SF=16)
-    const flagRows = {
-        ZF: 14,
-        CF: 15,
-        SF: 16
-    };
-
-    if (flagRows.hasOwnProperty(flagName)) {
-        let row = flagRows[flagName];
-        sheet.GetCells(row, 3).SetValue(value);
-    }
-}
-
-function testCPU() {
-    // 1. Probar enmascaramiento a 8 bits (300 & 0xFF = 44)
-    SetRegister("AX", 300);
-
-    // 2. Probar otros registros
-    SetRegister("PC", 0x15);
-    SetRegister("IR", 0x01);
-    SetRegister("MAR", 0x00);
-    SetRegister("MDR", 0x1F);
-    SetRegister("BX", 0xAB);
-
-    // 3. Probar banderas de estado
-    SetFlag("ZF", 1);
-    SetFlag("CF", 0);
-    SetFlag("SF", 1);
-
-    // 4. Probar segmentación en consola
-    console.log(`GetSegment(0x1F): ${GetSegment(0x1F)}`); // CODE
-    console.log(`GetSegment(0x20): ${GetSegment(0x20)}`); // RESERVED
-    console.log(`GetSegment(0x80): ${GetSegment(0x80)}`); // DATA
-}
-
-// Ejecutar pruebas
-testCPU();

@@ -30,7 +30,7 @@ function WriteRAM(address, value) {
     }
 
     memory[address] = value;
-    updateCellInSheet(address, value, currentDisplayMode);
+    UI.updateRamCell(address, value, currentDisplayMode);
 }
 
 /**
@@ -38,29 +38,8 @@ function WriteRAM(address, value) {
  */
 function ClearRAM() {
     memory.fill(0);
-    refreshEntireGrid();
+    UI.refreshRamGrid(currentDisplayMode);
     console.log("[RAM] Memory cleared (all 256 cells set to 0).");
-}
-
-/**
- * Convierte un byte a su representación Hexadecimal (ej: "1A")
- */
-function toHex(val) {
-    return val.toString(16).toUpperCase().padStart(2, '0');
-}
-
-/**
- * Convierte un byte a su representación Binaria de 8 bits (ej: "00011010")
- */
-function toBin(val) {
-    return val.toString(2).padStart(8, '0');
-}
-
-/**
- * Devuelve el valor en Decimal sin signo (ej: "26")
- */
-function toDec(val) {
-    return val.toString(10);
 }
 
 /**
@@ -104,43 +83,6 @@ function toMnemonic(address, val) {
 }
 
 /**
- * Actualiza una celda específica de la RAM en la hoja de ONLYOFFICE.
- * Basado en tu diseño: Filas 5 a 20 (índices), Columnas K a Z (columnas 11 a 26).
- */
-
-function updateCellInSheet(address, value, mode) {
-    const sheet = Api.GetActiveSheet();
-
-    const rowOffset = Math.floor(address / 16); // 0 a 15 (filas de bloques de 16 bytes)
-    const colOffset = address % 16;            // 0 a 15 (columnas de 0 a F)
-
-    const excelRow = 8 + rowOffset;            // Fila inicial de la RAM es 8 (00h está en K8)
-    const excelCol = 11 + colOffset;           // Columna K es el índice 11
-
-    const cell = sheet.GetCells(excelRow, excelCol);
-
-    let displayValue = "";
-    switch (mode) {
-        case "BIN":
-            displayValue = toBin(value);
-            break;
-        case "DEC":
-            displayValue = toDec(value);
-            break;
-        case "MNEMONIC":
-            displayValue = toMnemonic(address, value);
-            break;
-        case "HEX":
-        default:
-            displayValue = toHex(value);
-            break;
-    }
-
-    cell.SetValue(displayValue);
-}
-
-
-/**
  * Cambia el modo de visualización global de toda la grilla RAM (HEX, BIN, DEC, MNEMONIC).
  */
 function SetDisplayMode(mode) {
@@ -150,15 +92,6 @@ function SetDisplayMode(mode) {
         return;
     }
     currentDisplayMode = mode;
-    refreshEntireGrid();
+    UI.refreshRamGrid(currentDisplayMode);
     console.log(`[RAM] Display mode changed to: ${mode}`);
-}
-
-/**
- * Refresca todas las 256 celdas de la grilla en la hoja según el vector de memoria actual.
- */
-function refreshEntireGrid() {
-    for (let addr = 0x00; addr <= 0xFF; addr++) {
-        updateCellInSheet(addr, memory[addr], currentDisplayMode);
-    }
 }
