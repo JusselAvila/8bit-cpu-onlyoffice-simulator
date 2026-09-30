@@ -42,44 +42,13 @@ function ClearRAM() {
     console.log("[RAM] Memory cleared (all 256 cells set to 0).");
 }
 
-/**
- * Convierte un código máquina (opcode) a su Mnemónico correspondiente según la ISA.
- */
 function toMnemonic(address, val) {
-    // Si está fuera del Code Segment (00h - 1Fh), se muestra como formato hexadecimal plano
     if (address > 0x1F) return toHex(val);
 
-    switch (val) {
-        case 0x00: return "HLT";
-        case 0x01: return "MOV AX, imm";
-        case 0x02: return "MOV BX, imm";
-        case 0x03: return "MOV AX, BX";
-        case 0x04: return "MOV BX, AX";
-        case 0x05: return "LOAD AX";
-        case 0x06: return "LOAD BX";
-        case 0x07: return "STORE AX";
-        case 0x08: return "STORE BX";
-        case 0x10: return "ADD AX, imm";
-        case 0x11: return "ADD BX, imm";
-        case 0x12: return "ADD AX, BX";
-        case 0x13: return "ADD BX, AX";
-        case 0x14: return "SUB AX, imm";
-        case 0x15: return "SUB BX, imm";
-        case 0x16: return "SUB AX, BX";
-        case 0x17: return "SUB BX, AX";
-        case 0x18: return "INC AX";
-        case 0x19: return "INC BX";
-        case 0x1A: return "DEC AX";
-        case 0x1B: return "DEC BX";
-        case 0x1C: return "CMP AX, imm";
-        case 0x1D: return "CMP BX, imm";
-        case 0x1E: return "CMP AX, BX";
-        case 0x1F: return "CMP BX, AX";
-        case 0x30: return "JMP dir";
-        case 0x31: return "JZ dir";
-        case 0x32: return "JNZ dir";
-        default: return `DB ${toHex(val)}`; // Operando o byte de datos dentro del área de código
-    }
+    const instruction = GetInstruction(val);
+    if (!instruction) return `DB ${toHex(val)}`; // operand byte or illegal opcode shown as raw data
+
+    return instruction.mnemonic;
 }
 
 /**

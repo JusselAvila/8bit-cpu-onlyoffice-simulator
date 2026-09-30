@@ -179,6 +179,7 @@ See [`/docs/architecture.md`](docs/architecture.md) for the module breakdown and
   alu.js      Arithmetic/logic operations (pending)
   decoder.js  Opcode decoding (pending)
   logger.js   Execution log panel (pending)
+  isa.js      Single source of truth for the ISA (opcode table, GetInstruction, IsValidOpcode)
   main.js     Wires STEP/RUN/PAUSE/RESET/LOAD to the modules (pending)
 /docs         Architecture notes, screenshots, platform approval
 /program      Demo program (.asm and .hex)
