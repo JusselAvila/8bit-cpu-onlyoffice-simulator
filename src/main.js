@@ -246,3 +246,242 @@ function LoadDemoProgram() {
     WriteLog(`[LOAD] Loading built-in demo program (multiplication by successive additions)`);
     return LoadProgramFromBytes(demoBytes);
 }
+
+
+// --- Execute/Store phase state (Task 4.1 / 4.2) ---
+let pendingWriteback = null; // { type: "REGISTER", reg, value } | { type: "MEMORY", address, value } | null
+
+function getSrcValue(instr) {
+    switch (instr.src) {
+        case "AX": return registers.AX;
+        case "BX": return registers.BX;
+        case "IMM": return instr.operand;
+        default: return null;
+    }
+}
+
+/**
+ * Applies an ALU result to the flag registers.
+ * CF === null means "leave CF unchanged" (INC/DEC semantics).
+ */
+function ApplyALUFlags(aluResult) {
+    SetFlag("ZF", aluResult.ZF);
+    if (aluResult.CF !== null && aluResult.CF !== undefined) {
+        SetFlag("CF", aluResult.CF);
+    }
+    SetFlag("SF", aluResult.SF);
+}
+
+/**
+ * Executes exactly one micro-operation of the Execute phase.
+ * Dispatches by decodedInstruction.op, using the ALU for arithmetic/logic
+ * instructions and direct register writes for MOV/branches.
+ */
+function Execute_Step() {
+    if (executionState.halted) return true;
+    const instr = decodedInstruction;
+
+    switch (instr.op) {
+        case "HLT": {
+            stepCounter++;
+            WriteLog(`[Step ${pad(stepCounter)}] EXECUTE: HLT encountered - clock stopped`);
+            executionState.halted = true;
+            WriteLog(`[Step ${pad(stepCounter)}] HALTED: no further micro-operations until RESET`);
+            pendingWriteback = null;
+            return true;
+        }
+
+        case "MOV": {
+            const value = getSrcValue(instr);
+            pendingWriteback = { type: "REGISTER", reg: instr.dest, value: value };
+            stepCounter++;
+            WriteLog(`[Step ${pad(stepCounter)}] EXECUTE: MOV -> ${instr.dest} will receive 0x${toHex(value)} (no flags)`);
+            executionState.phase = "STORE";
+            executionState.microStep = 0;
+            return true;
+        }
+
+        case "LOAD": {
+            switch (executionState.microStep) {
+                case 0: {
+                    SetRegister("MAR", instr.operand);
+                    stepCounter++;
+                    WriteLog(`[Step ${pad(stepCounter)}] EXECUTE: MAR <- 0x${toHex(instr.operand)} (LOAD address)`);
+                    executionState.microStep = 1;
+                    return false;
+                }
+                case 1: {
+                    const value = Bus.read(registers.MAR);
+                    SetRegister("MDR", value);
+                    stepCounter++;
+                    WriteLog(`[Step ${pad(stepCounter)}] EXECUTE: MDR <- RAM[0x${toHex(registers.MAR)}] = 0x${toHex(value)}`);
+                    pendingWriteback = { type: "REGISTER", reg: instr.dest, value: value };
+                    executionState.phase = "STORE";
+                    executionState.microStep = 0;
+                    return true;
+                }
+            }
+            break;
+        }
+
+        case "STORE": {
+            const value = getSrcValue(instr);
+            pendingWriteback = { type: "MEMORY", address: instr.operand, value: value };
+            stepCounter++;
+            WriteLog(`[Step ${pad(stepCounter)}] EXECUTE: preparing STORE of ${instr.src} (0x${toHex(value)}) to [0x${toHex(instr.operand)}]`);
+            executionState.phase = "STORE";
+            executionState.microStep = 0;
+            return true;
+        }
+
+        case "ADD": case "SUB": case "AND": case "OR": case "XOR": {
+            const a = registers[instr.dest];
+            const b = getSrcValue(instr);
+            const fn = { ADD: ALU_ADD, SUB: ALU_SUB, AND: ALU_AND, OR: ALU_OR, XOR: ALU_XOR }[instr.op];
+            const r = fn(a, b);
+            ApplyALUFlags(r);
+            pendingWriteback = { type: "REGISTER", reg: instr.dest, value: r.result };
+            stepCounter++;
+            WriteLog(`[Step ${pad(stepCounter)}] EXECUTE: ${instr.op} ${instr.dest}(0x${toHex(a)}), 0x${toHex(b)} = 0x${toHex(r.result)} (ZF=${r.ZF} CF=${r.CF} SF=${r.SF})`);
+            executionState.phase = "STORE";
+            executionState.microStep = 0;
+            return true;
+        }
+
+        case "INC": case "DEC": case "NOT": {
+            const a = registers[instr.dest];
+            const fn = { INC: ALU_INC, DEC: ALU_DEC, NOT: ALU_NOT }[instr.op];
+            const r = fn(a);
+            ApplyALUFlags(r);
+            pendingWriteback = { type: "REGISTER", reg: instr.dest, value: r.result };
+            stepCounter++;
+            WriteLog(`[Step ${pad(stepCounter)}] EXECUTE: ${instr.op} ${instr.dest}(0x${toHex(a)}) = 0x${toHex(r.result)} (ZF=${r.ZF} SF=${r.SF}${r.CF === null ? ", CF unchanged" : ""})`);
+            executionState.phase = "STORE";
+            executionState.microStep = 0;
+            return true;
+        }
+
+        case "CMP": {
+            const a = registers[instr.dest];
+            const b = getSrcValue(instr);
+            const r = ALU_CMP(a, b);
+            ApplyALUFlags(r);
+            pendingWriteback = null; // CMP never writes back
+            stepCounter++;
+            WriteLog(`[Step ${pad(stepCounter)}] EXECUTE: CMP ${instr.dest}(0x${toHex(a)}) vs 0x${toHex(b)} -> flags only (ZF=${r.ZF} CF=${r.CF} SF=${r.SF})`);
+            executionState.phase = "STORE";
+            executionState.microStep = 0;
+            return true;
+        }
+
+        case "JMP": {
+            stepCounter++;
+            WriteLog(`[Step ${pad(stepCounter)}] EXECUTE: JMP -> PC = 0x${toHex(instr.operand)}`);
+            SetRegister("PC", instr.operand);
+            pendingWriteback = null;
+            executionState.phase = "FETCH";
+            executionState.microStep = 0;
+            return true;
+        }
+
+        case "JZ": case "JNZ": {
+            const conditionMet = (instr.op === "JZ") ? (flags.ZF === 1) : (flags.ZF === 0);
+            stepCounter++;
+            if (conditionMet) {
+                WriteLog(`[Step ${pad(stepCounter)}] EXECUTE: ${instr.op} taken -> PC = 0x${toHex(instr.operand)}`);
+                SetRegister("PC", instr.operand);
+            } else {
+                WriteLog(`[Step ${pad(stepCounter)}] EXECUTE: ${instr.op} not taken -> PC continues sequentially (0x${toHex(registers.PC)})`);
+            }
+            pendingWriteback = null;
+            executionState.phase = "FETCH";
+            executionState.microStep = 0;
+            return true;
+        }
+
+        default:
+            throw new Error(`[Control Unit Error] Unknown instruction op: ${instr.op}`);
+    }
+}
+
+/**
+ * Executes exactly one micro-operation of the Store phase.
+ * Register write-backs are instant; memory write-backs (STORE instruction)
+ * go through MAR/MDR across three micro-steps, with Data Segment protection.
+ */
+function Store_Step() {
+    if (executionState.halted) return true;
+
+    if (!pendingWriteback) {
+        stepCounter++;
+        WriteLog(`[Step ${pad(stepCounter)}] STORE: no write-back required`);
+        executionState.phase = "FETCH";
+        executionState.microStep = 0;
+        return true;
+    }
+
+    if (pendingWriteback.type === "REGISTER") {
+        SetRegister(pendingWriteback.reg, pendingWriteback.value);
+        stepCounter++;
+        WriteLog(`[Step ${pad(stepCounter)}] STORE: ${pendingWriteback.reg} <- 0x${toHex(pendingWriteback.value)}`);
+        pendingWriteback = null;
+        executionState.phase = "FETCH";
+        executionState.microStep = 0;
+        return true;
+    }
+
+    // pendingWriteback.type === "MEMORY" (STORE instruction)
+    switch (executionState.microStep) {
+        case 0: {
+            const segment = GetSegment(pendingWriteback.address);
+            if (segment !== "DATA") {
+                stepCounter++;
+                WriteLog(`[Step ${pad(stepCounter)}] STORE: REJECTED - address 0x${toHex(pendingWriteback.address)} is in the ${segment} segment (writes only allowed in DATA, 80h-FFh)`);
+                pendingWriteback = null;
+                executionState.phase = "FETCH";
+                executionState.microStep = 0;
+                return true;
+            }
+            SetRegister("MAR", pendingWriteback.address);
+            stepCounter++;
+            WriteLog(`[Step ${pad(stepCounter)}] STORE: MAR <- 0x${toHex(pendingWriteback.address)}`);
+            executionState.microStep = 1;
+            return false;
+        }
+        case 1: {
+            SetRegister("MDR", pendingWriteback.value);
+            stepCounter++;
+            WriteLog(`[Step ${pad(stepCounter)}] STORE: MDR <- 0x${toHex(pendingWriteback.value)}`);
+            executionState.microStep = 2;
+            return false;
+        }
+        case 2: {
+            Bus.write(registers.MAR, registers.MDR);
+            stepCounter++;
+            WriteLog(`[Step ${pad(stepCounter)}] STORE: RAM[0x${toHex(registers.MAR)}] <- MDR (0x${toHex(registers.MDR)})`);
+            pendingWriteback = null;
+            executionState.phase = "FETCH";
+            executionState.microStep = 0;
+            return true;
+        }
+    }
+}
+
+/**
+ * Single entry point for one STEP click: dispatches to the current phase.
+ * This is what the STEP button (Task 5.1) will call.
+ */
+function Step() {
+    if (executionState.halted) {
+        WriteLog(`[Step ${pad(stepCounter)}] HALTED: no further steps until RESET`);
+        return;
+    }
+    switch (executionState.phase) {
+        case "FETCH": Fetch_Step(); break;
+        case "DECODE": Decode_Step(); break;
+        case "EXECUTE": Execute_Step(); break;
+        case "STORE": Store_Step(); break;
+        default: throw new Error(`[Control Unit Error] Unknown phase: ${executionState.phase}`);
+    }
+}
+

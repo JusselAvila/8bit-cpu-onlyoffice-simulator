@@ -176,11 +176,11 @@ See [`/docs/architecture.md`](docs/architecture.md) for the module breakdown and
   ram.js      256-byte RAM, ReadRAM/WriteRAM, ClearRAM, display-mode logic
   cpu.js      Registers, flags, GetSegment, ResetCPU
   ui.js       All ONLYOFFICE sheet/cell interaction (registers, flags, RAM grid)
-  alu.js      Arithmetic/logic operations (pending)
+  alu.js      Arithmetic/logic operations ()
   decoder.js  Pure opcode decoding (DecodeOpcode, BuildDecodedInstruction, Disassemble)
   logger.js   Execution log buffer (WriteLog, ClearLog) - sheet panel added in Task 5.2  
   isa.js      Single source of truth for the ISA (opcode table, GetInstruction, IsValidOpcode)
-  main.js     Instruction-cycle control unit (Fetch/Decode implemented; Execute/Store pending) + Program Loader (LoadProgram, LoadDemoProgram) + button wiring (pending)
+  main.js     Instruction-cycle control unit (Fetch/Decode/Execute/Store complete) + Program Loader + button wiring
 /docs         Architecture notes, screenshots, platform approval
 /program      Demo program (.asm and .hex)
 /tests        Test plan and test cases

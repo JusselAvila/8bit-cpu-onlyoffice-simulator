@@ -98,7 +98,8 @@ function ResetCPU() {
     executionState.microStep = 0;
     executionState.halted = false;
     stepCounter = 0;
-    decodedInstruction = null;   // <-- Limpia la instrucción decodificada
+    decodedInstruction = null; 
+    pendingWriteback = null;
     ClearLog();
 
     // Delegate phase/step-counter visual reset to ui.js

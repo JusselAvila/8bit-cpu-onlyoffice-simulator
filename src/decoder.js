@@ -12,13 +12,10 @@ function DecodeOpcode(irValue) {
     return GetInstruction(irValue);
 }
 
-/**
- * Builds the structured metadata object handed to the Execution Unit.
- * operandByte is null for 1-byte instructions.
- */
 function BuildDecodedInstruction(opcodeId, entry, operandByte) {
     return {
         opcodeId: opcodeId,
+        op: entry.op,          // <-- añadido, usado por Execute_Step para el dispatch
         mnemonic: entry.mnemonic,
         mode: entry.mode,
         dest: entry.dest,
