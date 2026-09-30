@@ -78,6 +78,8 @@ function SetFlag(flagName, value) {
     UI.updateFlag(flagName, flags[flagName]);
 }
 
+
+
 function ResetCPU() {
     // Reset registers to 0
     for (let reg in registers) {
@@ -96,6 +98,7 @@ function ResetCPU() {
     executionState.microStep = 0;
     executionState.halted = false;
     stepCounter = 0;
+    decodedInstruction = null;   // <-- Limpia la instrucción decodificada
     ClearLog();
 
     // Delegate phase/step-counter visual reset to ui.js

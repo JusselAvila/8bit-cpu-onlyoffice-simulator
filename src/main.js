@@ -77,5 +77,85 @@ function Fetch_Step() {
     }
 }
 
-
 	
+let decodedInstruction = null;
+
+/**
+ * Executes exactly one micro-operation of the Decode phase.
+ * Call once per STEP click while executionState.phase === "DECODE".
+ * Returns true when Decode has completed (decodedInstruction ready,
+ * control handed over to Execute).
+ */
+function Decode_Step() {
+    if (executionState.halted) {
+        WriteLog(`[Step ${pad(stepCounter)}] HALTED: no further steps until RESET`);
+        return true;
+    }
+
+    switch (executionState.microStep) {
+        case 0: {
+            const entry = DecodeOpcode(registers.IR);
+
+            if (!entry) {
+                stepCounter++;
+                WriteLog(`[Step ${pad(stepCounter)}] DECODE: ILLEGAL OPCODE 0x${toHex(registers.IR)} -> HALTED`);
+                executionState.halted = true;
+                return true;
+            }
+
+            if (entry.bytes === 1) {
+                // No operand to fetch: decode completes in a single micro-step.
+                decodedInstruction = BuildDecodedInstruction(registers.IR, entry, null);
+                stepCounter++;
+                WriteLog(`[Step ${pad(stepCounter)}] DECODE: IR=0x${toHex(registers.IR)} -> ${Disassemble(entry, null)}`);
+                executionState.microStep = 0;
+                executionState.phase = "EXECUTE";
+                return true;
+            }
+
+            // 2-byte instruction: proceed to fetch the operand byte.
+            executionState.microStep = 1;
+            return false;
+        }
+        case 1: {
+            // MAR <- PC
+            SetRegister("MAR", registers.PC);
+            stepCounter++;
+            WriteLog(`[Step ${pad(stepCounter)}] DECODE: MAR <- PC (0x${toHex(registers.PC)})`);
+            executionState.microStep = 2;
+            return false;
+        }
+        case 2: {
+            // MDR <- RAM[MAR], through the Bus (this is the operand byte)
+            const value = Bus.read(registers.MAR);
+            SetRegister("MDR", value);
+            stepCounter++;
+            WriteLog(`[Step ${pad(stepCounter)}] DECODE: MDR <- RAM[0x${toHex(registers.MAR)}] = 0x${toHex(value)} (operand)`);
+            executionState.microStep = 3;
+            return false;
+        }
+        case 3: {
+            // PC <- PC + 1, with 8-bit wraparound
+            const oldPC = registers.PC;
+            const newPC = (oldPC + 1) & 0xFF;
+            SetRegister("PC", newPC);
+            stepCounter++;
+
+            if (oldPC === 0xFF) {
+                WriteLog(`[Step ${pad(stepCounter)}] DECODE: PC wrapped 0xFF -> 0x00 (WARNING: program counter overflow)`);
+            } else {
+                WriteLog(`[Step ${pad(stepCounter)}] DECODE: PC <- PC + 1 (0x${toHex(oldPC)} -> 0x${toHex(newPC)})`);
+            }
+
+            const entry = GetInstruction(registers.IR);
+            decodedInstruction = BuildDecodedInstruction(registers.IR, entry, registers.MDR);
+            WriteLog(`[Step ${pad(stepCounter)}] DECODE: ${Disassemble(entry, registers.MDR)}`);
+
+            executionState.microStep = 0;
+            executionState.phase = "EXECUTE";
+            return true;
+        }
+        default:
+            throw new Error(`[Control Unit Error] Invalid Decode microStep: ${executionState.microStep}`);
+    }
+}
