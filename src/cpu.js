@@ -78,10 +78,6 @@ function SetFlag(flagName, value) {
     UI.updateFlag(flagName, flags[flagName]);
 }
 
-/**
- * Resets the CPU to its initial state without clearing RAM contents,
- * and clears the current phase state and step counter in the UI.
- */
 function ResetCPU() {
     // Reset registers to 0
     for (let reg in registers) {
@@ -95,7 +91,14 @@ function ResetCPU() {
         UI.updateFlag(flag, 0);
     }
 
-    // Delegate phase/step-counter reset to ui.js
+    // Reset the instruction-cycle control unit (main.js)
+    executionState.phase = "FETCH";
+    executionState.microStep = 0;
+    executionState.halted = false;
+    stepCounter = 0;
+    ClearLog();
+
+    // Delegate phase/step-counter visual reset to ui.js
     UI.resetPhaseIndicator();
 
     console.log("[CPU] CPU reset successfully (RAM contents preserved, Phase reset).");
