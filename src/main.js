@@ -1,174 +1,459 @@
-// src/main.js - CPU instruction cycle control unit
-// Fetch phase implemented here (Task 3.2). Decode (#26) and Execute/Store (#29)
-// extend the same phase/microStep state machine; button wiring (STEP/RUN/PAUSE/
-// RESET/LOAD) is completed in Task 5.1/5.2.
+// src/main.js - Instruction-cycle control unit, program loader, run/pause engine.
 
 const executionState = {
     phase: "FETCH",   // FETCH | DECODE | EXECUTE | STORE
-    microStep: 0,     // index within the current phase's micro-operation sequence
+    microStep: 0,
     halted: false
 };
 
 let stepCounter = 0;
+let decodedInstruction = null;
+let pendingWriteback = null;
+let isRunning = false;
+let runTimerId = null;
+let runId = 0;
 
-function pad(n) {
-    return n.toString().padStart(2, "0");
+const RUN_BATCH_LIMIT = 500;
+
+function hx(value) {
+    return "0x" + toHex(value);
+}
+
+const REG = name => UI.registerCellRef(name);
+const FLAG = name => UI.flagCellRef(name);
+const RAM = address => UI.ramCellRef(address);
+const ALU_CELLS = () => [REG("AX"), REG("BX"), FLAG("ZF"), FLAG("CF"), FLAG("SF")];
+
+function RegisterSnapshot() {
+    return { registers: Object.assign({}, registers), flags: Object.assign({}, flags) };
 }
 
 /**
- * Executes exactly one micro-operation of the Fetch phase.
- * Call once per STEP click while executionState.phase === "FETCH".
- * Returns true when the Fetch phase has completed (IR loaded, PC incremented,
- * control handed over to Decode).
+ * Commits one micro-operation to the UI: clears the previous highlight,
+ * paints the active cells with the phase color, updates the phase
+ * indicator and writes exactly one log line. Call after the register
+ * transfer so the snapshot shows the resulting state.
  */
-function Fetch_Step() {
-    if (executionState.halted) {
-        WriteLog(`[Step ${pad(stepCounter)}] HALTED: no further steps until RESET`);
-        return true;
+function CompleteMicroOp(phase, label, logText, cells) {
+    stepCounter++;
+    UI.clearHighlights();
+    if (cells && cells.length > 0) {
+        UI.highlightCells(cells, UI.COLORS[phase]);
     }
+    UI.updatePhaseIndicator(phase, label, stepCounter);
+    WriteLog(logText, { step: stepCounter, phase: phase, snapshot: RegisterSnapshot() });
+}
 
+function IncrementPC() {
+    const oldPC = registers.PC;
+    const newPC = (oldPC + 1) & 0xFF;
+    SetRegister("PC", newPC);
+    return oldPC === 0xFF
+        ? "PC wrapped 0xFF -> 0x00 (WARNING: program counter overflow)"
+        : `PC <- PC + 1 (${hx(oldPC)} -> ${hx(newPC)})`;
+}
+
+/**
+ * Error text for the log: message, macro build and the first stack frame,
+ * so a failing ONLYOFFICE API call can be traced to its line in the macro.
+ */
+function DescribeError(e) {
+    const build = typeof MACRO_BUILD !== "undefined" ? MACRO_BUILD : "src";
+    const frames = (e && e.stack ? String(e.stack) : "").split("\n").slice(1);
+    const where = frames.length > 0 ? frames[0].trim() : "";
+    return `${e && e.message ? e.message : e} [build ${build}]${where ? " " + where : ""}`;
+}
+
+function Halt() {
+    executionState.halted = true;
+    StopRunLoop();
+}
+
+// --- Fetch phase ---
+function Fetch_Step() {
     switch (executionState.microStep) {
         case 0: {
-            // MAR <- PC
             SetRegister("MAR", registers.PC);
-            stepCounter++;
-            WriteLog(`[Step ${pad(stepCounter)}] FETCH: MAR <- PC (0x${toHex(registers.PC)})`);
+            CompleteMicroOp("FETCH", "MAR <- PC", `MAR <- PC (${hx(registers.PC)})`,
+                [REG("PC"), REG("MAR"), RAM(registers.PC)]);
             executionState.microStep = 1;
-            return false;
+            return;
         }
         case 1: {
-            // MDR <- RAM[MAR], through the Bus
-            const value = Bus.read(registers.MAR);
-            SetRegister("MDR", value);
-            stepCounter++;
-            WriteLog(`[Step ${pad(stepCounter)}] FETCH: MDR <- RAM[0x${toHex(registers.MAR)}] = 0x${toHex(value)}`);
+            SetRegister("MDR", Bus.read(registers.MAR));
+            CompleteMicroOp("FETCH", "MDR <- RAM[MAR]", `MDR <- RAM[${hx(registers.MAR)}] = ${hx(registers.MDR)}`,
+                [REG("MAR"), REG("MDR"), RAM(registers.MAR)]);
             executionState.microStep = 2;
-            return false;
+            return;
         }
         case 2: {
-            // IR <- MDR
             SetRegister("IR", registers.MDR);
-            stepCounter++;
-            WriteLog(`[Step ${pad(stepCounter)}] FETCH: IR <- MDR (0x${toHex(registers.MDR)})`);
+            const entry = GetInstruction(registers.IR);
+            const name = entry ? entry.mnemonic : "??";
+            CompleteMicroOp("FETCH", "IR <- MDR", `IR <- MDR (${hx(registers.IR)}) -> IR=${name}`,
+                [REG("MDR"), REG("IR"), RAM(registers.MAR)]);
             executionState.microStep = 3;
-            return false;
+            return;
         }
         case 3: {
-            // PC <- PC + 1, with 8-bit wraparound (FFh -> 00h)
-            const oldPC = registers.PC;
-            const newPC = (oldPC + 1) & 0xFF;
-            SetRegister("PC", newPC);
-            stepCounter++;
-
-            if (oldPC === 0xFF) {
-                WriteLog(`[Step ${pad(stepCounter)}] FETCH: PC wrapped 0xFF -> 0x00 (WARNING: program counter overflow)`);
-            } else {
-                WriteLog(`[Step ${pad(stepCounter)}] FETCH: PC <- PC + 1 (0x${toHex(oldPC)} -> 0x${toHex(newPC)})`);
-            }
-
-            // Fetch complete: reset micro-step for the next instruction's Fetch
-            // and hand control to Decode (Task 3.3).
+            const text = IncrementPC();
+            CompleteMicroOp("FETCH", "PC <- PC + 1", text, [REG("PC"), RAM(registers.MAR)]);
             executionState.microStep = 0;
             executionState.phase = "DECODE";
-            return true;
+            return;
         }
         default:
             throw new Error(`[Control Unit Error] Invalid Fetch microStep: ${executionState.microStep}`);
     }
 }
 
-	
-let decodedInstruction = null;
-
-/**
- * Executes exactly one micro-operation of the Decode phase.
- * Call once per STEP click while executionState.phase === "DECODE".
- * Returns true when Decode has completed (decodedInstruction ready,
- * control handed over to Execute).
- */
+// --- Decode phase ---
 function Decode_Step() {
-    if (executionState.halted) {
-        WriteLog(`[Step ${pad(stepCounter)}] HALTED: no further steps until RESET`);
-        return true;
-    }
-
     switch (executionState.microStep) {
         case 0: {
             const entry = DecodeOpcode(registers.IR);
 
             if (!entry) {
-                stepCounter++;
-                WriteLog(`[Step ${pad(stepCounter)}] DECODE: ILLEGAL OPCODE 0x${toHex(registers.IR)} -> HALTED`);
-                executionState.halted = true;
-                return true;
+                Halt();
+                CompleteMicroOp("DECODE", "ILLEGAL OPCODE", `ILLEGAL OPCODE ${hx(registers.IR)} -> HALTED`, [REG("IR")]);
+                return;
             }
 
             if (entry.bytes === 1) {
-                // No operand to fetch: decode completes in a single micro-step.
                 decodedInstruction = BuildDecodedInstruction(registers.IR, entry, null);
-                stepCounter++;
-                WriteLog(`[Step ${pad(stepCounter)}] DECODE: IR=0x${toHex(registers.IR)} -> ${Disassemble(entry, null)}`);
+                const disasm = Disassemble(entry, null);
+                CompleteMicroOp("DECODE", disasm, `IR=${hx(registers.IR)} -> ${disasm}`, [REG("IR")]);
                 executionState.microStep = 0;
                 executionState.phase = "EXECUTE";
-                return true;
+                return;
             }
 
-            // 2-byte instruction: proceed to fetch the operand byte.
+            CompleteMicroOp("DECODE", "decode opcode (operand needed)",
+                `IR=${hx(registers.IR)} -> ${entry.mnemonic} (2-byte, operand follows)`, [REG("IR")]);
             executionState.microStep = 1;
-            return false;
+            return;
         }
         case 1: {
-            // MAR <- PC
             SetRegister("MAR", registers.PC);
-            stepCounter++;
-            WriteLog(`[Step ${pad(stepCounter)}] DECODE: MAR <- PC (0x${toHex(registers.PC)})`);
+            CompleteMicroOp("DECODE", "MAR <- PC (operand)", `MAR <- PC (${hx(registers.PC)})`,
+                [REG("PC"), REG("MAR"), RAM(registers.PC)]);
             executionState.microStep = 2;
-            return false;
+            return;
         }
         case 2: {
-            // MDR <- RAM[MAR], through the Bus (this is the operand byte)
-            const value = Bus.read(registers.MAR);
-            SetRegister("MDR", value);
-            stepCounter++;
-            WriteLog(`[Step ${pad(stepCounter)}] DECODE: MDR <- RAM[0x${toHex(registers.MAR)}] = 0x${toHex(value)} (operand)`);
+            SetRegister("MDR", Bus.read(registers.MAR));
+            CompleteMicroOp("DECODE", "MDR <- RAM[MAR] (operand)",
+                `MDR <- RAM[${hx(registers.MAR)}] = ${hx(registers.MDR)} (operand)`,
+                [REG("MAR"), REG("MDR"), RAM(registers.MAR)]);
             executionState.microStep = 3;
-            return false;
+            return;
         }
         case 3: {
-            // PC <- PC + 1, with 8-bit wraparound
-            const oldPC = registers.PC;
-            const newPC = (oldPC + 1) & 0xFF;
-            SetRegister("PC", newPC);
-            stepCounter++;
-
-            if (oldPC === 0xFF) {
-                WriteLog(`[Step ${pad(stepCounter)}] DECODE: PC wrapped 0xFF -> 0x00 (WARNING: program counter overflow)`);
-            } else {
-                WriteLog(`[Step ${pad(stepCounter)}] DECODE: PC <- PC + 1 (0x${toHex(oldPC)} -> 0x${toHex(newPC)})`);
-            }
-
+            const pcText = IncrementPC();
             const entry = GetInstruction(registers.IR);
             decodedInstruction = BuildDecodedInstruction(registers.IR, entry, registers.MDR);
-            WriteLog(`[Step ${pad(stepCounter)}] DECODE: ${Disassemble(entry, registers.MDR)}`);
-
+            const disasm = Disassemble(entry, registers.MDR);
+            CompleteMicroOp("DECODE", disasm, `${pcText}; decoded ${disasm}`,
+                [REG("IR"), REG("MDR"), REG("PC")]);
             executionState.microStep = 0;
             executionState.phase = "EXECUTE";
-            return true;
+            return;
         }
         default:
             throw new Error(`[Control Unit Error] Invalid Decode microStep: ${executionState.microStep}`);
     }
 }
 
+// --- Execute phase ---
+function getSrcValue(instr) {
+    switch (instr.src) {
+        case "AX": return registers.AX;
+        case "BX": return registers.BX;
+        case "IMM": return instr.operand;
+        default: return null;
+    }
+}
 
-// --- Program Loader (Task 3.4) ---
+function ApplyALUFlags(aluResult) {
+    SetFlag("ZF", aluResult.ZF);
+    if (aluResult.CF !== null && aluResult.CF !== undefined) {
+        SetFlag("CF", aluResult.CF);
+    }
+    SetFlag("SF", aluResult.SF);
+}
+
+function goToStore(writeback) {
+    pendingWriteback = writeback;
+    executionState.phase = "STORE";
+    executionState.microStep = 0;
+}
+
+function Execute_Step() {
+    const instr = decodedInstruction;
+
+    switch (instr.op) {
+        case "HLT": {
+            Halt();
+            pendingWriteback = null;
+            CompleteMicroOp("EXECUTE", "HLT", "HLT encountered - clock stopped until RESET", [REG("IR")]);
+            return;
+        }
+
+        case "MOV": {
+            const value = getSrcValue(instr);
+            CompleteMicroOp("EXECUTE", `MOV ${instr.dest}`,
+                `MOV -> ${instr.dest} will receive ${hx(value)} (no flags)`, ALU_CELLS());
+            goToStore({ type: "REGISTER", reg: instr.dest, value: value });
+            return;
+        }
+
+        case "LOAD": {
+            if (executionState.microStep === 0) {
+                SetRegister("MAR", instr.operand);
+                CompleteMicroOp("EXECUTE", "MAR <- address", `MAR <- ${hx(instr.operand)} (LOAD address)`,
+                    [REG("MAR"), RAM(instr.operand)]);
+                executionState.microStep = 1;
+                return;
+            }
+            SetRegister("MDR", Bus.read(registers.MAR));
+            CompleteMicroOp("EXECUTE", "MDR <- RAM[MAR]", `MDR <- RAM[${hx(registers.MAR)}] = ${hx(registers.MDR)}`,
+                [REG("MAR"), REG("MDR"), RAM(registers.MAR)]);
+            goToStore({ type: "REGISTER", reg: instr.dest, value: registers.MDR });
+            return;
+        }
+
+        case "STORE": {
+            const value = getSrcValue(instr);
+            CompleteMicroOp("EXECUTE", `STORE [${hx(instr.operand)}]`,
+                `preparing STORE of ${instr.src} (${hx(value)}) to [${hx(instr.operand)}]`, [REG(instr.src)]);
+            goToStore({ type: "MEMORY", address: instr.operand, value: value });
+            return;
+        }
+
+        case "ADD": case "SUB": case "AND": case "OR": case "XOR": {
+            const a = registers[instr.dest];
+            const b = getSrcValue(instr);
+            const fn = { ADD: ALU_ADD, SUB: ALU_SUB, AND: ALU_AND, OR: ALU_OR, XOR: ALU_XOR }[instr.op];
+            const r = fn(a, b);
+            ApplyALUFlags(r);
+            CompleteMicroOp("EXECUTE", `${instr.op} ${instr.dest}`,
+                `${instr.op} ${instr.dest}(${hx(a)}), ${hx(b)} = ${hx(r.result)}`, ALU_CELLS());
+            goToStore({ type: "REGISTER", reg: instr.dest, value: r.result });
+            return;
+        }
+
+        case "INC": case "DEC": case "NOT": {
+            const a = registers[instr.dest];
+            const fn = { INC: ALU_INC, DEC: ALU_DEC, NOT: ALU_NOT }[instr.op];
+            const r = fn(a);
+            ApplyALUFlags(r);
+            CompleteMicroOp("EXECUTE", `${instr.op} ${instr.dest}`,
+                `${instr.op} ${instr.dest}(${hx(a)}) = ${hx(r.result)}${r.CF === null ? " (CF unchanged)" : ""}`,
+                ALU_CELLS());
+            goToStore({ type: "REGISTER", reg: instr.dest, value: r.result });
+            return;
+        }
+
+        case "CMP": {
+            const a = registers[instr.dest];
+            const b = getSrcValue(instr);
+            ApplyALUFlags(ALU_CMP(a, b));
+            CompleteMicroOp("EXECUTE", `CMP ${instr.dest}`,
+                `CMP ${instr.dest}(${hx(a)}) vs ${hx(b)} -> flags only`, ALU_CELLS());
+            goToStore(null);
+            return;
+        }
+
+        case "JMP": {
+            CompleteMicroOp("EXECUTE", `JMP ${hx(instr.operand)}`,
+                `JMP -> target ${hx(instr.operand)}`, [REG("PC"), RAM(instr.operand)]);
+            goToStore({ type: "REGISTER", reg: "PC", value: instr.operand });
+            return;
+        }
+
+        case "JZ": case "JNZ": {
+            const taken = (instr.op === "JZ") ? (flags.ZF === 1) : (flags.ZF === 0);
+            CompleteMicroOp("EXECUTE", `${instr.op} ${taken ? "taken" : "not taken"}`,
+                taken ? `${instr.op} taken (ZF=${flags.ZF}) -> target ${hx(instr.operand)}`
+                      : `${instr.op} not taken (ZF=${flags.ZF}) -> PC continues at ${hx(registers.PC)}`,
+                [FLAG("ZF"), REG("PC")]);
+            goToStore(taken ? { type: "REGISTER", reg: "PC", value: instr.operand } : null);
+            return;
+        }
+
+        default:
+            throw new Error(`[Control Unit Error] Unknown instruction op: ${instr.op}`);
+    }
+}
+
+// --- Store phase ---
+function finishStore() {
+    pendingWriteback = null;
+    executionState.phase = "FETCH";
+    executionState.microStep = 0;
+}
+
+function Store_Step() {
+    const wb = pendingWriteback;
+
+    if (!wb) {
+        CompleteMicroOp("STORE", "no write-back", "no write-back required", []);
+        finishStore();
+        return;
+    }
+
+    if (wb.type === "REGISTER") {
+        SetRegister(wb.reg, wb.value);
+        CompleteMicroOp("STORE", `${wb.reg} <- ${hx(wb.value)}`, `${wb.reg} <- ${hx(wb.value)}`, [REG(wb.reg)]);
+        finishStore();
+        return;
+    }
+
+    switch (executionState.microStep) {
+        case 0: {
+            const segment = GetSegment(wb.address);
+            if (segment !== "DATA") {
+                CompleteMicroOp("STORE", "REJECTED (segment)",
+                    `REJECTED - address ${hx(wb.address)} is in the ${segment} segment (writes only allowed in DATA, 80h-FFh)`,
+                    [RAM(wb.address)]);
+                finishStore();
+                return;
+            }
+            SetRegister("MAR", wb.address);
+            CompleteMicroOp("STORE", "MAR <- address", `MAR <- ${hx(wb.address)}`, [REG("MAR"), RAM(wb.address)]);
+            executionState.microStep = 1;
+            return;
+        }
+        case 1: {
+            SetRegister("MDR", wb.value);
+            CompleteMicroOp("STORE", "MDR <- register", `MDR <- ${hx(wb.value)}`, [REG("MDR"), RAM(wb.address)]);
+            executionState.microStep = 2;
+            return;
+        }
+        case 2: {
+            Bus.write(registers.MAR, registers.MDR);
+            CompleteMicroOp("STORE", "RAM[MAR] <- MDR", `RAM[${hx(registers.MAR)}] <- MDR (${hx(registers.MDR)})`,
+                [RAM(registers.MAR)]);
+            finishStore();
+            return;
+        }
+        default:
+            throw new Error(`[Control Unit Error] Invalid Store microStep: ${executionState.microStep}`);
+    }
+}
+
+// --- Dispatcher: advances exactly one micro-operation ---
+function ExecuteOneMicroOp() {
+    if (executionState.halted) {
+        WriteLog(`[Step ${pad(stepCounter)}] HALTED: no further steps until RESET`);
+        return;
+    }
+    switch (executionState.phase) {
+        case "FETCH": Fetch_Step(); break;
+        case "DECODE": Decode_Step(); break;
+        case "EXECUTE": Execute_Step(); break;
+        case "STORE": Store_Step(); break;
+        default: throw new Error(`[Control Unit Error] Unknown phase: ${executionState.phase}`);
+    }
+}
+
+// --- Button macros ---
+// STEP button
+function Step() {
+    if (isRunning) {
+        WriteLog(`[STEP] Ignored: RUN in progress, press PAUSE first`);
+        return;
+    }
+    ExecuteOneMicroOp();
+}
+
+// RESET button: registers, flags, phase, step counter, highlights and log (RAM is kept)
+function Reset() {
+    ResetCPU();
+}
+
+// --- RUN / PAUSE engine ---
+// Every button click is a separate macro run, so PAUSE/RESET cannot reach
+// the timer created by RUN. The loop is instead controlled through the
+// persisted state: each tick reloads it and stops when isRunning is false
+// or another RUN has replaced runId.
+function StopRunLoop() {
+    isRunning = false;
+    if (runTimerId !== null) {
+        clearTimeout(runTimerId);
+        runTimerId = null;
+    }
+}
+
+function RunTick(myRunId) {
+    runTimerId = null;
+    LoadState();
+    if (!isRunning || runId !== myRunId) return;
+
+    try {
+        ExecuteOneMicroOp();
+    } catch (e) {
+        StopRunLoop();
+        WriteLog(`[RUN] Stopped on error: ${DescribeError(e)}`);
+    }
+    if (isRunning && executionState.halted) {
+        StopRunLoop();
+        WriteLog(`[RUN] Finished at step ${pad(stepCounter)} (CPU halted)`);
+    }
+    SaveState();
+
+    if (isRunning) {
+        // The delay is read on every tick so the speed cell can be edited while running.
+        runTimerId = setTimeout(() => RunTick(myRunId), UI.getDelayMs());
+    }
+}
+
+// RUN button
+function Run() {
+    if (executionState.halted) {
+        WriteLog(`[RUN] Cannot start: CPU is halted, press RESET first`);
+        return;
+    }
+    if (typeof setTimeout !== "function") {
+        WriteLog(`[RUN] setTimeout not available in this sandbox, falling back to batch mode`);
+        RunBatch(RUN_BATCH_LIMIT);
+        return;
+    }
+    isRunning = true;
+    runId = Date.now();
+    WriteLog(`[RUN] Started (delay=${UI.getDelayMs()}ms)`);
+    SaveState();
+    const myRunId = runId;
+    runTimerId = setTimeout(() => RunTick(myRunId), 0);
+}
+
+// PAUSE button
+function Pause() {
+    if (!isRunning) return;
+    StopRunLoop();
+    WriteLog(`[PAUSE] Execution paused at step ${pad(stepCounter)} (state preserved)`);
+}
 
 /**
- * Parses a space-separated hex byte string, e.g. "01 00 02 05".
- * Pure function - no sheet access, no side effects - so it can be unit-tested
- * independently of the ONLYOFFICE environment.
- * Throws on empty input or any invalid token.
+ * Fallback for sandboxes without timers: executes up to maxSteps
+ * micro-operations synchronously, stopping on HLT or an illegal opcode.
  */
+function RunBatch(maxSteps) {
+    let count = 0;
+    while (!executionState.halted && count < maxSteps) {
+        ExecuteOneMicroOp();
+        count++;
+    }
+    WriteLog(`[RUN] Batch executed ${count} micro-operations (halted=${executionState.halted})`);
+}
+
+// RUN (batch) button
+function RunToEnd() {
+    if (isRunning) StopRunLoop();
+    RunBatch(RUN_BATCH_LIMIT);
+}
+
+// --- Program Loader ---
 function ParseHexProgram(text) {
     if (typeof text !== "string" || text.trim() === "") {
         throw new Error("program source is empty");
@@ -184,12 +469,6 @@ function ParseHexProgram(text) {
     return bytes;
 }
 
-/**
- * Core loader: validates and writes a byte array into the Code Segment,
- * clears any leftover bytes from a previous (longer) program, resets the
- * CPU, and logs the result.
- * Returns true on success, false if the program was rejected.
- */
 function LoadProgramFromBytes(bytes) {
     if (!Array.isArray(bytes) || bytes.length === 0) {
         WriteLog(`[LOAD] ERROR: program is empty`);
@@ -210,19 +489,20 @@ function LoadProgramFromBytes(bytes) {
     for (let i = 0; i < bytes.length; i++) {
         Bus.write(i, bytes[i]);
     }
-    UI.refreshRamGrid(currentDisplayMode); // ensures leftover cleared cells (beyond new length) also refresh
+    UI.refreshRamGrid(currentDisplayMode);
 
     ResetCPU();
-    WriteLog(`[LOAD] Program loaded: ${bytes.length} bytes into Code Segment (00h-${toHex(bytes.length - 1)}h)`);
+    const build = typeof MACRO_BUILD !== "undefined" ? MACRO_BUILD : "src";
+    WriteLog(`[LOAD] Program loaded: ${bytes.length} bytes into Code Segment (00h-${toHex(bytes.length - 1)}h) [build ${build}]`);
     return true;
 }
 
-/**
- * Reads the program source cell, parses it and loads it.
- * This is the function wired to the LOAD PROGRAM button (Task 5.1).
- */
+// LOAD PROGRAM button (loads the built-in demo when the source cell is empty)
 function LoadProgram() {
     const text = UI.getProgramSourceText();
+    if (text.trim() === "") {
+        return LoadDemoProgram();
+    }
     let bytes;
     try {
         bytes = ParseHexProgram(text);
@@ -233,255 +513,41 @@ function LoadProgram() {
     return LoadProgramFromBytes(bytes);
 }
 
-/**
- * Loads the mandatory Task 6.1 demonstration program (5 x 6 by successive
- * additions) and writes its hex text into the source cell so it is visible
- * and editable afterwards (needed for live-modification scenarios in the defense).
- */
 function LoadDemoProgram() {
     const demoBytes = [0x01, 0x00, 0x02, 0x05, 0x10, 0x06, 0x1B, 0x32, 0x04, 0x07, 0x80, 0x00];
     const demoText = demoBytes.map(b => toHex(b)).join(" ");
-
     UI.setProgramSourceText(demoText);
-    WriteLog(`[LOAD] Loading built-in demo program (multiplication by successive additions)`);
-    return LoadProgramFromBytes(demoBytes);
+    const loaded = LoadProgramFromBytes(demoBytes);
+    if (loaded) {
+        WriteLog(`[LOAD] Built-in demo program: multiplication 5 x 6 by successive additions`);
+    }
+    return loaded;
 }
 
+// --- Macro entry point ---
+// Each ONLYOFFICE button runs its own macro; every run restores the state
+// saved by the previous one, performs the action and saves it again.
+const ACTIONS = {
+    LOAD: LoadProgram,
+    LOAD_DEMO: LoadDemoProgram,
+    STEP: Step,
+    RUN: Run,
+    RUN_TO_END: RunToEnd,
+    PAUSE: Pause,
+    RESET: Reset
+};
 
-// --- Execute/Store phase state (Task 4.1 / 4.2) ---
-let pendingWriteback = null; // { type: "REGISTER", reg, value } | { type: "MEMORY", address, value } | null
-
-function getSrcValue(instr) {
-    switch (instr.src) {
-        case "AX": return registers.AX;
-        case "BX": return registers.BX;
-        case "IMM": return instr.operand;
-        default: return null;
+function SimulatorMain(action) {
+    const handler = ACTIONS[action];
+    if (!handler) {
+        throw new Error(`[Simulator] Unknown action: ${action}`);
     }
+    LoadState();
+    try {
+        handler();
+    } catch (e) {
+        StopRunLoop();
+        WriteLog(`[ERROR] ${action}: ${DescribeError(e)}`);
+    }
+    SaveState();
 }
-
-/**
- * Applies an ALU result to the flag registers.
- * CF === null means "leave CF unchanged" (INC/DEC semantics).
- */
-function ApplyALUFlags(aluResult) {
-    SetFlag("ZF", aluResult.ZF);
-    if (aluResult.CF !== null && aluResult.CF !== undefined) {
-        SetFlag("CF", aluResult.CF);
-    }
-    SetFlag("SF", aluResult.SF);
-}
-
-/**
- * Executes exactly one micro-operation of the Execute phase.
- * Dispatches by decodedInstruction.op, using the ALU for arithmetic/logic
- * instructions and direct register writes for MOV/branches.
- */
-function Execute_Step() {
-    if (executionState.halted) return true;
-    const instr = decodedInstruction;
-
-    switch (instr.op) {
-        case "HLT": {
-            stepCounter++;
-            WriteLog(`[Step ${pad(stepCounter)}] EXECUTE: HLT encountered - clock stopped`);
-            executionState.halted = true;
-            WriteLog(`[Step ${pad(stepCounter)}] HALTED: no further micro-operations until RESET`);
-            pendingWriteback = null;
-            return true;
-        }
-
-        case "MOV": {
-            const value = getSrcValue(instr);
-            pendingWriteback = { type: "REGISTER", reg: instr.dest, value: value };
-            stepCounter++;
-            WriteLog(`[Step ${pad(stepCounter)}] EXECUTE: MOV -> ${instr.dest} will receive 0x${toHex(value)} (no flags)`);
-            executionState.phase = "STORE";
-            executionState.microStep = 0;
-            return true;
-        }
-
-        case "LOAD": {
-            switch (executionState.microStep) {
-                case 0: {
-                    SetRegister("MAR", instr.operand);
-                    stepCounter++;
-                    WriteLog(`[Step ${pad(stepCounter)}] EXECUTE: MAR <- 0x${toHex(instr.operand)} (LOAD address)`);
-                    executionState.microStep = 1;
-                    return false;
-                }
-                case 1: {
-                    const value = Bus.read(registers.MAR);
-                    SetRegister("MDR", value);
-                    stepCounter++;
-                    WriteLog(`[Step ${pad(stepCounter)}] EXECUTE: MDR <- RAM[0x${toHex(registers.MAR)}] = 0x${toHex(value)}`);
-                    pendingWriteback = { type: "REGISTER", reg: instr.dest, value: value };
-                    executionState.phase = "STORE";
-                    executionState.microStep = 0;
-                    return true;
-                }
-            }
-            break;
-        }
-
-        case "STORE": {
-            const value = getSrcValue(instr);
-            pendingWriteback = { type: "MEMORY", address: instr.operand, value: value };
-            stepCounter++;
-            WriteLog(`[Step ${pad(stepCounter)}] EXECUTE: preparing STORE of ${instr.src} (0x${toHex(value)}) to [0x${toHex(instr.operand)}]`);
-            executionState.phase = "STORE";
-            executionState.microStep = 0;
-            return true;
-        }
-
-        case "ADD": case "SUB": case "AND": case "OR": case "XOR": {
-            const a = registers[instr.dest];
-            const b = getSrcValue(instr);
-            const fn = { ADD: ALU_ADD, SUB: ALU_SUB, AND: ALU_AND, OR: ALU_OR, XOR: ALU_XOR }[instr.op];
-            const r = fn(a, b);
-            ApplyALUFlags(r);
-            pendingWriteback = { type: "REGISTER", reg: instr.dest, value: r.result };
-            stepCounter++;
-            WriteLog(`[Step ${pad(stepCounter)}] EXECUTE: ${instr.op} ${instr.dest}(0x${toHex(a)}), 0x${toHex(b)} = 0x${toHex(r.result)} (ZF=${r.ZF} CF=${r.CF} SF=${r.SF})`);
-            executionState.phase = "STORE";
-            executionState.microStep = 0;
-            return true;
-        }
-
-        case "INC": case "DEC": case "NOT": {
-            const a = registers[instr.dest];
-            const fn = { INC: ALU_INC, DEC: ALU_DEC, NOT: ALU_NOT }[instr.op];
-            const r = fn(a);
-            ApplyALUFlags(r);
-            pendingWriteback = { type: "REGISTER", reg: instr.dest, value: r.result };
-            stepCounter++;
-            WriteLog(`[Step ${pad(stepCounter)}] EXECUTE: ${instr.op} ${instr.dest}(0x${toHex(a)}) = 0x${toHex(r.result)} (ZF=${r.ZF} SF=${r.SF}${r.CF === null ? ", CF unchanged" : ""})`);
-            executionState.phase = "STORE";
-            executionState.microStep = 0;
-            return true;
-        }
-
-        case "CMP": {
-            const a = registers[instr.dest];
-            const b = getSrcValue(instr);
-            const r = ALU_CMP(a, b);
-            ApplyALUFlags(r);
-            pendingWriteback = null; // CMP never writes back
-            stepCounter++;
-            WriteLog(`[Step ${pad(stepCounter)}] EXECUTE: CMP ${instr.dest}(0x${toHex(a)}) vs 0x${toHex(b)} -> flags only (ZF=${r.ZF} CF=${r.CF} SF=${r.SF})`);
-            executionState.phase = "STORE";
-            executionState.microStep = 0;
-            return true;
-        }
-
-        case "JMP": {
-            stepCounter++;
-            WriteLog(`[Step ${pad(stepCounter)}] EXECUTE: JMP -> PC = 0x${toHex(instr.operand)}`);
-            SetRegister("PC", instr.operand);
-            pendingWriteback = null;
-            executionState.phase = "FETCH";
-            executionState.microStep = 0;
-            return true;
-        }
-
-        case "JZ": case "JNZ": {
-            const conditionMet = (instr.op === "JZ") ? (flags.ZF === 1) : (flags.ZF === 0);
-            stepCounter++;
-            if (conditionMet) {
-                WriteLog(`[Step ${pad(stepCounter)}] EXECUTE: ${instr.op} taken -> PC = 0x${toHex(instr.operand)}`);
-                SetRegister("PC", instr.operand);
-            } else {
-                WriteLog(`[Step ${pad(stepCounter)}] EXECUTE: ${instr.op} not taken -> PC continues sequentially (0x${toHex(registers.PC)})`);
-            }
-            pendingWriteback = null;
-            executionState.phase = "FETCH";
-            executionState.microStep = 0;
-            return true;
-        }
-
-        default:
-            throw new Error(`[Control Unit Error] Unknown instruction op: ${instr.op}`);
-    }
-}
-
-/**
- * Executes exactly one micro-operation of the Store phase.
- * Register write-backs are instant; memory write-backs (STORE instruction)
- * go through MAR/MDR across three micro-steps, with Data Segment protection.
- */
-function Store_Step() {
-    if (executionState.halted) return true;
-
-    if (!pendingWriteback) {
-        stepCounter++;
-        WriteLog(`[Step ${pad(stepCounter)}] STORE: no write-back required`);
-        executionState.phase = "FETCH";
-        executionState.microStep = 0;
-        return true;
-    }
-
-    if (pendingWriteback.type === "REGISTER") {
-        SetRegister(pendingWriteback.reg, pendingWriteback.value);
-        stepCounter++;
-        WriteLog(`[Step ${pad(stepCounter)}] STORE: ${pendingWriteback.reg} <- 0x${toHex(pendingWriteback.value)}`);
-        pendingWriteback = null;
-        executionState.phase = "FETCH";
-        executionState.microStep = 0;
-        return true;
-    }
-
-    // pendingWriteback.type === "MEMORY" (STORE instruction)
-    switch (executionState.microStep) {
-        case 0: {
-            const segment = GetSegment(pendingWriteback.address);
-            if (segment !== "DATA") {
-                stepCounter++;
-                WriteLog(`[Step ${pad(stepCounter)}] STORE: REJECTED - address 0x${toHex(pendingWriteback.address)} is in the ${segment} segment (writes only allowed in DATA, 80h-FFh)`);
-                pendingWriteback = null;
-                executionState.phase = "FETCH";
-                executionState.microStep = 0;
-                return true;
-            }
-            SetRegister("MAR", pendingWriteback.address);
-            stepCounter++;
-            WriteLog(`[Step ${pad(stepCounter)}] STORE: MAR <- 0x${toHex(pendingWriteback.address)}`);
-            executionState.microStep = 1;
-            return false;
-        }
-        case 1: {
-            SetRegister("MDR", pendingWriteback.value);
-            stepCounter++;
-            WriteLog(`[Step ${pad(stepCounter)}] STORE: MDR <- 0x${toHex(pendingWriteback.value)}`);
-            executionState.microStep = 2;
-            return false;
-        }
-        case 2: {
-            Bus.write(registers.MAR, registers.MDR);
-            stepCounter++;
-            WriteLog(`[Step ${pad(stepCounter)}] STORE: RAM[0x${toHex(registers.MAR)}] <- MDR (0x${toHex(registers.MDR)})`);
-            pendingWriteback = null;
-            executionState.phase = "FETCH";
-            executionState.microStep = 0;
-            return true;
-        }
-    }
-}
-
-/**
- * Single entry point for one STEP click: dispatches to the current phase.
- * This is what the STEP button (Task 5.1) will call.
- */
-function Step() {
-    if (executionState.halted) {
-        WriteLog(`[Step ${pad(stepCounter)}] HALTED: no further steps until RESET`);
-        return;
-    }
-    switch (executionState.phase) {
-        case "FETCH": Fetch_Step(); break;
-        case "DECODE": Decode_Step(); break;
-        case "EXECUTE": Execute_Step(); break;
-        case "STORE": Store_Step(); break;
-        default: throw new Error(`[Control Unit Error] Unknown phase: ${executionState.phase}`);
-    }
-}
-

@@ -79,31 +79,28 @@ function SetFlag(flagName, value) {
 }
 
 
-
 function ResetCPU() {
-    // Reset registers to 0
+    StopRunLoop();
+
     for (let reg in registers) {
         registers[reg] = 0x00;
         UI.updateRegister(reg, 0x00);
     }
 
-    // Reset flags to 0
     for (let flag in flags) {
         flags[flag] = 0;
         UI.updateFlag(flag, 0);
     }
 
-    // Reset the instruction-cycle control unit (main.js)
     executionState.phase = "FETCH";
     executionState.microStep = 0;
     executionState.halted = false;
     stepCounter = 0;
-    decodedInstruction = null; 
+    decodedInstruction = null;
     pendingWriteback = null;
     ClearLog();
 
-    // Delegate phase/step-counter visual reset to ui.js
-    UI.resetPhaseIndicator();
+    UI.resetPhaseIndicator(); // also clears all highlights
 
     console.log("[CPU] CPU reset successfully (RAM contents preserved, Phase reset).");
 }

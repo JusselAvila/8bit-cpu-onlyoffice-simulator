@@ -1,3 +1,16 @@
+// src/isa.js - Single source of truth for the 8-bit ISA
+// Used by: decoder.js, main.js (loader), ram.js (toMnemonic disassembly), README
+
+const ADDRESSING_MODES = {
+    IMPLIED: "IMPLIED",                 // no operand (HLT, INC, DEC, NOT, register-to-register handled below)
+    IMMEDIATE: "IMMEDIATE",             // reg, imm8
+    REGISTER: "REGISTER",               // reg, reg
+    DIRECT: "DIRECT"                    // [dir] memory address
+};
+
+// Table indexed by opcode (number). Each entry documents exactly what the
+// specification's "Opcode Encoding Table" objective asks for:
+// Opcode, Mnemonic, Addressing Mode, Bytes, Flags affected, Description.
 const ISA = {
     0x00: { op: "HLT",  mnemonic: "HLT",         bytes: 1, mode: ADDRESSING_MODES.IMPLIED,   dest: null, src: null,  flags: [],                description: "Stops the clock. No further micro-operations execute until RESET." },
 
@@ -44,3 +57,38 @@ const ISA = {
     0x31: { op: "JZ",  mnemonic: "JZ dir",  bytes: 2, mode: ADDRESSING_MODES.DIRECT, dest: "PC", src: null, flags: [], description: "Jump if ZF == 1: PC = dir." },
     0x32: { op: "JNZ", mnemonic: "JNZ dir", bytes: 2, mode: ADDRESSING_MODES.DIRECT, dest: "PC", src: null, flags: [], description: "Jump if ZF == 0: PC = dir." }
 };
+
+/**
+ * Looks up an opcode in the ISA table.
+ * Returns undefined for opcodes not present in the table -
+ * callers (decoder.js) are responsible for raising ILLEGAL OPCODE and halting.
+ */
+function GetInstruction(opcode) {
+    return ISA[opcode];
+}
+
+/**
+ * Returns true if the opcode is defined in the ISA.
+ */
+function IsValidOpcode(opcode) {
+    return ISA.hasOwnProperty(opcode);
+}
+
+/**
+ * Validates that every ISA entry has the required fields and a valid length.
+ */
+function ValidateISA() {
+    for (const opcode in ISA) {
+        const entry = ISA[opcode];
+        const required = ["op", "mnemonic", "bytes", "mode", "flags", "description"];
+        for (const field of required) {
+            if (!entry.hasOwnProperty(field)) {
+                throw new Error(`[ISA Error] Opcode 0x${Number(opcode).toString(16)} is missing field "${field}"`);
+            }
+        }
+        if (entry.bytes !== 1 && entry.bytes !== 2) {
+            throw new Error(`[ISA Error] Opcode 0x${Number(opcode).toString(16)} has invalid byte length: ${entry.bytes}`);
+        }
+    }
+    console.log(`[ISA] Validated ${Object.keys(ISA).length} instructions successfully.`);
+}

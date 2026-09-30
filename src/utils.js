@@ -8,3 +8,6 @@ function toBin(val) {
 function toDec(val) {
     return val.toString(10);
 }
+function pad(n) {
+    return n.toString().padStart(2, "0");
+}

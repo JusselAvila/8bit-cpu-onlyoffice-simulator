@@ -33,6 +33,31 @@ The **only** module permitted to interact with the ONLYOFFICE spreadsheet cells 
 * **`UI.resetPhaseIndicator()`**: Resets instruction phase (`FETCH`) and step counter indicators.
 * **`UI.updateRamCell(address, value, mode)`**: Refreshes an individual cell coordinate on the RAM grid based on current visualization modes.
 * **`UI.refreshRamGrid(mode)`**: Iterates through all memory addresses to redraw the entire RAM grid.
+* **`UI.highlightCells(cellRefs, colorRgb)`** / **`UI.clearHighlights()`**: Paints the active cells with the phase color (`UI.COLORS`) and restores them to white before the next micro-operation or on RESET.
+* **`UI.updatePhaseIndicator(phase, microOpText, stepNum)`**: Writes the current phase, micro-operation and step counter.
+* **`UI.getDelayMs()`**: Reads the RUN delay from the speed cell (`C24`).
+* **`UI.refreshLogPanel(entries)`**: Redraws the 16-row log table (`B28:Z43`, one column per register).
+* **`UI.readStateText()`** / **`UI.writeStateText(text)`**: Access the serialized state cell (`BH1`).
+
+### 1.6 Logger (`src/logger.js`)
+* **`WriteLog(message, details)`**: Appends a timestamped entry (optionally with step, phase and register snapshot); drops the oldest entry once the panel is full.
+* **`ClearLog()`**: Empties the buffer and the panel (called by `ResetCPU()`).
+
+### 1.7 Control Unit (`src/main.js`)
+Phase/micro-step state machine (`FETCH → DECODE → EXECUTE → STORE`). Each call to `ExecuteOneMicroOp()` performs exactly one register transfer and reports it through `CompleteMicroOp()`, which clears the previous highlight, paints the new cells, updates the phase indicator and writes one log line.
+* **`Step()`**: STEP button, one micro-operation (ignored while RUN is active).
+* **`Run()`** / **`Pause()`**: `setTimeout`-driven loop that re-reads the delay every tick and stops on `HLT` or an illegal opcode; `RunBatch(maxSteps)` is the fallback when timers are not available.
+* **`Reset()`**: RESET button, delegates to `ResetCPU()`.
+* **`LoadProgram()`** / **`LoadDemoProgram()`**: Parse and load hex bytes into the Code Segment.
+* **`SimulatorMain(action)`**: Entry point called by every button macro (`LOAD`, `LOAD_DEMO`, `STEP`, `RUN`, `RUN_TO_END`, `PAUSE`, `RESET`): restores the state, runs the action and saves the state again.
+
+### 1.8 State persistence (`src/state.js`)
+ONLYOFFICE executes each button macro as an independent script, so nothing kept in JavaScript variables survives between clicks.
+* **`SaveState()`**: Serializes registers, flags, RAM, execution phase, pending write-back, highlights, log and RUN status as JSON into `BH1`.
+* **`LoadState()`**: Restores that JSON at the start of every macro run and of every RUN tick.
+
+### 1.9 Button macros (`tools/build-macros.js` → `dist/macros/`)
+Concatenates every `/src` module into one self-contained macro per button, ending in `SimulatorMain("<ACTION>")`.
 
 ### 1.5 Utility Engine (`src/utils.js`)
 Pure formatting functions shared across modules.
