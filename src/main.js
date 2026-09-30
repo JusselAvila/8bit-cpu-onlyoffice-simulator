@@ -159,3 +159,90 @@ function Decode_Step() {
             throw new Error(`[Control Unit Error] Invalid Decode microStep: ${executionState.microStep}`);
     }
 }
+
+
+// --- Program Loader (Task 3.4) ---
+
+/**
+ * Parses a space-separated hex byte string, e.g. "01 00 02 05".
+ * Pure function - no sheet access, no side effects - so it can be unit-tested
+ * independently of the ONLYOFFICE environment.
+ * Throws on empty input or any invalid token.
+ */
+function ParseHexProgram(text) {
+    if (typeof text !== "string" || text.trim() === "") {
+        throw new Error("program source is empty");
+    }
+    const tokens = text.trim().split(/\s+/);
+    const bytes = tokens.map(tok => {
+        const value = parseInt(tok, 16);
+        if (isNaN(value) || value < 0 || value > 255) {
+            throw new Error(`invalid byte token "${tok}"`);
+        }
+        return value;
+    });
+    return bytes;
+}
+
+/**
+ * Core loader: validates and writes a byte array into the Code Segment,
+ * clears any leftover bytes from a previous (longer) program, resets the
+ * CPU, and logs the result.
+ * Returns true on success, false if the program was rejected.
+ */
+function LoadProgramFromBytes(bytes) {
+    if (!Array.isArray(bytes) || bytes.length === 0) {
+        WriteLog(`[LOAD] ERROR: program is empty`);
+        return false;
+    }
+    if (bytes.length > 32) {
+        WriteLog(`[LOAD] ERROR: program size (${bytes.length} bytes) exceeds Code Segment capacity (32 bytes, 00h-1Fh)`);
+        return false;
+    }
+    for (const b of bytes) {
+        if (!Number.isInteger(b) || b < 0 || b > 255) {
+            WriteLog(`[LOAD] ERROR: invalid byte value ${b} in program`);
+            return false;
+        }
+    }
+
+    ClearCodeSegment();
+    for (let i = 0; i < bytes.length; i++) {
+        Bus.write(i, bytes[i]);
+    }
+    UI.refreshRamGrid(currentDisplayMode); // ensures leftover cleared cells (beyond new length) also refresh
+
+    ResetCPU();
+    WriteLog(`[LOAD] Program loaded: ${bytes.length} bytes into Code Segment (00h-${toHex(bytes.length - 1)}h)`);
+    return true;
+}
+
+/**
+ * Reads the program source cell, parses it and loads it.
+ * This is the function wired to the LOAD PROGRAM button (Task 5.1).
+ */
+function LoadProgram() {
+    const text = UI.getProgramSourceText();
+    let bytes;
+    try {
+        bytes = ParseHexProgram(text);
+    } catch (e) {
+        WriteLog(`[LOAD] ERROR: ${e.message}`);
+        return false;
+    }
+    return LoadProgramFromBytes(bytes);
+}
+
+/**
+ * Loads the mandatory Task 6.1 demonstration program (5 x 6 by successive
+ * additions) and writes its hex text into the source cell so it is visible
+ * and editable afterwards (needed for live-modification scenarios in the defense).
+ */
+function LoadDemoProgram() {
+    const demoBytes = [0x01, 0x00, 0x02, 0x05, 0x10, 0x06, 0x1B, 0x32, 0x04, 0x07, 0x80, 0x00];
+    const demoText = demoBytes.map(b => toHex(b)).join(" ");
+
+    UI.setProgramSourceText(demoText);
+    WriteLog(`[LOAD] Loading built-in demo program (multiplication by successive additions)`);
+    return LoadProgramFromBytes(demoBytes);
+}

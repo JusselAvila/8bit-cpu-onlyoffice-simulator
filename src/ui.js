@@ -10,6 +10,7 @@ const UI = {
         ZF: 14, CF: 15, SF: 16
     },
     ramOrigin: { row: 8, col: 11 }, // K8 = address 00h
+    programSourceCell: { row: 25, col: 11 }, // K25: text cell with space-separated hex bytes
 
     updateRegister: function(regName, value) {
         const sheet = Api.GetActiveSheet();
@@ -56,5 +57,16 @@ const UI = {
         for (let addr = 0x00; addr <= 0xFF; addr++) {
             this.updateRamCell(addr, ReadRAM(addr), mode);
         }
+    },
+
+    getProgramSourceText: function() {
+        const sheet = Api.GetActiveSheet();
+        const cell = sheet.GetCells(this.programSourceCell.row, this.programSourceCell.col);
+        return cell.GetValue();
+    },
+
+    setProgramSourceText: function(text) {
+        const sheet = Api.GetActiveSheet();
+        sheet.GetCells(this.programSourceCell.row, this.programSourceCell.col).SetValue(text);
     }
 };

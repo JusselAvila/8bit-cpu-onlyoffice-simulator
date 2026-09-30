@@ -64,3 +64,16 @@ function SetDisplayMode(mode) {
     UI.refreshRamGrid(currentDisplayMode);
     console.log(`[RAM] Display mode changed to: ${mode}`);
 }
+
+
+
+/**
+ * Clears only the Code Segment (00h-1Fh), leaving the rest of RAM untouched.
+ * Used by the loader so a shorter program fully overwrites a previous longer one.
+ */
+function ClearCodeSegment() {
+    for (let addr = 0x00; addr <= 0x1F; addr++) {
+        memory[addr] = 0;
+    }
+    console.log("[RAM] Code segment cleared (00h-1Fh).");
+}

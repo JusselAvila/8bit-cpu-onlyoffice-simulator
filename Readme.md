@@ -119,12 +119,12 @@ In code, the CPU never touches the RAM array directly: every read/write goes thr
 
 ## 4. User manual
 
-1. Open `simulator.xlsx` in ONLYOFFICE.
-2. Open `View → Macros` and paste/load the simulator code.
-3. Press `LOAD PROGRAM` to load the demo program.
-4. Use `STEP` for one micro-operation at a time, or `RUN` for continuous execution (adjust the delay cell).
-5. Use `PAUSE` to stop and `RESET` to restore registers, flags and log.
+1. Open simulator.xlsx in ONLYOFFICE.
+2. Open View → Macros and paste/load the simulator code.
+3. Type the program as space-separated hex bytes into the source cell (K25) and press LOAD PROGRAM, or press LOAD PROGRAM without editing to run the built-in demo (multiplication by successive additions).
+4. Use STEP for one micro-operation at a time, or RUN for continuous execution.
 
+    Use PAUSE to stop and RESET to restore registers, flags, and memory.
 ## 5. Demo program: 5 × 6 by successive additions
 
 ```asm
@@ -180,7 +180,7 @@ See [`/docs/architecture.md`](docs/architecture.md) for the module breakdown and
   decoder.js  Pure opcode decoding (DecodeOpcode, BuildDecodedInstruction, Disassemble)
   logger.js   Execution log buffer (WriteLog, ClearLog) - sheet panel added in Task 5.2  
   isa.js      Single source of truth for the ISA (opcode table, GetInstruction, IsValidOpcode)
-  main.js     Instruction-cycle control unit (Fetch implemented; Decode/Execute/Store pending) + button wiring (pending)
+  main.js     Instruction-cycle control unit (Fetch/Decode implemented; Execute/Store pending) + Program Loader (LoadProgram, LoadDemoProgram) + button wiring (pending)
 /docs         Architecture notes, screenshots, platform approval
 /program      Demo program (.asm and .hex)
 /tests        Test plan and test cases
