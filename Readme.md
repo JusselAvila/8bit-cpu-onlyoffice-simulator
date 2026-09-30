@@ -178,9 +178,9 @@ See [`/docs/architecture.md`](docs/architecture.md) for the module breakdown and
   ui.js       All ONLYOFFICE sheet/cell interaction (registers, flags, RAM grid)
   alu.js      Arithmetic/logic operations (pending)
   decoder.js  Opcode decoding (pending)
-  logger.js   Execution log panel (pending)
+  logger.js   Execution log buffer (WriteLog, ClearLog) - sheet panel added in Task 5.2  
   isa.js      Single source of truth for the ISA (opcode table, GetInstruction, IsValidOpcode)
-  main.js     Wires STEP/RUN/PAUSE/RESET/LOAD to the modules (pending)
+  main.js     Instruction-cycle control unit (Fetch implemented; Decode/Execute/Store pending) + button wiring (pending)
 /docs         Architecture notes, screenshots, platform approval
 /program      Demo program (.asm and .hex)
 /tests        Test plan and test cases
